@@ -40,7 +40,7 @@ The inability to easily rekey or add members to the group makes implementing the
 
 ## Shamir Secret Sharing
 
-Enter [Shamir Secret Sharing](https://en.wikipedia.org/wiki/Shamir%27s_Secret_Sharing). In this algorithm, a secret is divided into multiple parts and the parts are distributed to the users. Any "threshold value" _n_ of the parts can be used to decrypt anything encrypted with the secret, where the value of _n_ is configurable at the time the key is generated.
+Enter [Shamir Secret Sharing](https://en.wikipedia.org/wiki/Shamir%27s_Secret_Sharing). In this algorithm, a secret is divided into multiple parts and the parts are distributed to the users. Any "threshold value" _n_ of the parts can be used to decrypt anything encrypted with the secret, where the value of _n_ is configurable at the time the key is generated. This algorithm is often used to require multiple people to collaborate to decrypt something (like having 2 people "turn their keys" to launch the missiles from a submarine). But in our case we can use a threshold value of 1 to allow any single peer to decrypt.
 
 Shamir Secret Sharing has been demonstrated in successful open source commercial products such as [Hashicorp's Vault](https://www.vaultproject.io/). Much like in Vault, we'll rely on Shamir Secret Sharing to perform "envelope encryption" for all data stored on the chain.
 
