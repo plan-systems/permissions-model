@@ -101,6 +101,10 @@ Bob wants to join in the chat.
 
 Now Bob's PLAN and SKI software can use this key to participate in the chat and read all previous discussions.
 
+![Key workflow](./img/workflow.svg)
+
+## Example, Rekeying
+
 Later, Eve has joined the chat but soon begins annoying other users by posting dog pictures. The community decides to expel Eve by re-keying the channel.
 
 1. Alice's creates a new `./key/kitties/2` channel.
@@ -126,6 +130,8 @@ The channel path schema is as follows:
     $user         = String
     $doc_type     = (public|master)
 ```
+
+![Channel data projection](./img/data-projection.svg)
 
 The encryption primitives of the protocol can be specific to each SKI implementation, but a recommended implementation would be as follows:
 
