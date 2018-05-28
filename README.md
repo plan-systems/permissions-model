@@ -49,13 +49,14 @@ Encryption for a given PDI channel is initialized by a user's SKI as follows:
 3. The user's SKI generates a master symmetric encryption key for that channel.
 4. The user's SKI encrypts the master key with their keypair.
 5. The user writes their public key to the key channel, under their user namespace.
-6. The user writes the encrypted master key to the key channel, under their user namespace. (This step is not strictly necessary for the initial user but making it uniform for all users makes re-keying less complicated).
+6. The user writes their signature verification key to the key channel, under their user namespace.
+7. The user writes the encrypted master key to the key channel, under their user namespace. (This step is not strictly necessary for the initial user but making it uniform for all users makes re-keying less complicated).
 
 When a peer wants to write an encrypted block of data:
 1. PLAN passes the SKI the data to be encrypted and the encrypted master symmetric key block for the channel.
 2. The SKI decrypts the master key using its private key for that channel.
 3. The SKI uses the master key to encrypt the data.
-4. The SKI uses the user's key to sign the encrypted data.
+4. The SKI uses the user's signing key to sign the encrypted data.
 4. The SKI returns the encrypted/signed data to PLAN.
 5. PLAN writes this encrypted/signed data to the PDI.
 
@@ -64,7 +65,7 @@ Note that in this workflow no cleartext keys ever leave the SKI. This means that
 When a peer wants to read a block:
 1. PLAN passes the SKI the encrypted/signed data and the encrypted master symmetric key block for that channel.
 2. The SKI decrypts the master key using its private key for that channel.
-3. The SKI verifies the signature of the data against the public key of the originating user.
+3. The SKI verifies the signature of the data against the verification key of the originating user.
 3. The SKI uses the master key to decrypt the data.
 4. The SKI returns the unencrypted data to PLAN.
 
@@ -85,19 +86,21 @@ When a member is ejected from the community, a new master key can be created for
 In the example below, Alice wants to create a new encrypted chat channel for cat enthusiasts.
 
 1. Alice creates a new `./key/kitties/1` channel.
-2. Alice's SKI generates a new private-public keypair, associated with the `./key/kitties/1` channel.
+2. Alice's SKI generates a new keychain (private-public keypair and signing-verification keypairs), associated with the `./key/kitties/1` channel.
 3. Alice's SKI generates a new symmetric master key associated with the `./key/kitties/1` channel.
 4. Alice writes her public key to `./key/kitties/1/alice/public`
-5. Alice writes the encrypted master key to `./key/kitties/1/alice/master`
+5. Alice writes her verify key to `./key/kitties/1/alice/verify`
+6. Alice writes the encrypted master key to `./key/kitties/1/alice/master`
 
 Bob wants to join in the chat.
 
 1. Bob's SKI generates a new private-public keypair, associated with the `./key/kitties/1` channel.
-2. Bob writes the the public key to `./key/kitties/1/bob/public`
-3. Bob asks Alice to vouch for him, either in a different channel or offline.
-4. Alice's PLAN software takes the public key from `./key/kitties/1/bob/public` and the master key from `./key/kitties/1/alice/master`.
-4. Alice's SKI re-encrypts the master key with Bob's key and passes it back to PLAN.
-5. Alice's PLAN software writes the encrypted master key to `./key/kitties/1/bob/master`.
+2. Bob writes the public key to `./key/kitties/1/bob/public`
+3. Bob writes the verify key to `./key/kitties/1/bob/verify`
+4. Bob asks Alice to vouch for him, either in a different channel or offline.
+5. Alice's PLAN software takes the public key from `./key/kitties/1/bob/public` and the master key from `./key/kitties/1/alice/master`.
+6. Alice's SKI re-encrypts the master key with Bob's key and passes it back to PLAN.
+7. Alice's PLAN software writes the encrypted master key to `./key/kitties/1/bob/master`.
 
 Now Bob's PLAN and SKI software can use this key to participate in the chat and read all previous discussions.
 
@@ -119,7 +122,7 @@ Note that any peer can initiate a re-key but it requires consensus by the other 
 
 ## Protocol And Channel Schema
 
-The channel path schema is as follows:
+The key channel path schema is as follows:
 
 ```
 /pdi/${pdi_type}/key/${channel_name}/${version}/${user}/${doc_type}
@@ -128,17 +131,17 @@ The channel path schema is as follows:
     $channel_name = String
     $version      = Positive Integer
     $user         = String
-    $doc_type     = (public|master)
+    $doc_type     = (public|master|verify)
 ```
 
 ![Channel data projection](./img/data-projection.svg)
 
 The encryption primitives of the protocol can be specific to each SKI implementation, but a recommended implementation would be as follows:
 
-- **`AES`** in **`CBC`** mode with a 128-bit master key for symmetric encryption, using **`PKCS7`** for padding
+- **`Salsa 20`** stream cipher with 128-bit master key for symmetric encryption and authenticated by **`Poly1305 MAC`**
 - **`ECDSA`** with a 256-bit private key (providing a 128 bit key strength) for asymmetric encryption and signing
 
-The channel document schema for a user's public key is as follows (shown with dummy data):
+The channel document schema for a user's public or verify key is as follows (shown with dummy data):
 
 ```json
 {
@@ -146,11 +149,9 @@ The channel document schema for a user's public key is as follows (shown with du
   "key":  {
     "kty": "EC",
     "use": "enc",
-    "crv": "P-256",
+    "crv": "Ed25519",
     "kid": "8c7c909e-5763-4a66-92b5-dc622a448797",
     "x": "mHsfhR-M8QalLEND160idqT-4GaQsg9WG9-kjCe4jeQ",
-    "y": "W7anvWHIH14qdQzXJPyQyOpkWiefztwCFG47FxvnM_k",
-    "alg": "ES256"
   }
 }
 ```
@@ -159,24 +160,19 @@ The fields above are as follows:
 - **version**: the schema version, this could include specific SKI versions.
 - **key**: the public key of the user, JWK-encoded (fields below are part of the JWK spec).
   - **kty**: key type (typically `EC` for Elliptic Curve).
-  - **crv**: elliptic curve used.
+  - **crv**: elliptic curve used (typically `Ed25519`)
   - **kid**: unique key ID.
   - **x**: public key X-value.
-  - **y**: public key Y-value.
 
 The channel document schema for the encrypted master key is as follows (shown with dummy data):
 
 ```json
 {
   "version": "1.0.0",
-  "key": "xxxxxx",
-  "signature": "xxxxx",
-  "signer": "/pdi/eth/key/kitties/1/alice/public"
+  "key": "abec68a3e9c0c474b386d6b82d91bcfacb1adb600...",
 }
 ```
 
 The fields above are as follows:
 - **version**: the schema version, this could include specific SKI versions.
-- **key**: the encrypted master key.
-- **signature**: the signature for the `key` field, by the user who wrote this document.
-- **signer** a path to the public key of the user who wrote the document.
+- **key**: the encrypted master key and nonce.
