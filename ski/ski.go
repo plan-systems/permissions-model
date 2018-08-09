@@ -181,6 +181,27 @@ func (ski *SKI) Decrypt(
 	return decrypted, nil
 }
 
+// given an encrypted buffer, Decrypt decrypts it using
+// the community key for the channel and returns the cleartext buffer
+func (ski *SKI) XDecrypt(
+	keyID plan.CommunityKeyID,
+	encrypted []byte,
+) ([]byte, error) {
+	communityKey, err := ski.keyring.GetCommunityKeyByID(keyID)
+	if err != nil {
+		return []byte{}, err
+	}
+	var nonce [24]byte
+	copy(nonce[:], encrypted[:24])
+	decrypted, ok := secretbox.Open(nil, encrypted[24:],
+		&nonce, communityKeyToArray(communityKey))
+	if !ok {
+		return nil, plan.Error(
+			-1, "secretbox.Open failed but doesn't produce an error")
+	}
+	return decrypted, nil
+}
+
 // given an encrypted buffer, DecryptFrom decrypts it using
 // the user's private key and returns the decrypted buffer
 func (ski *SKI) DecryptFrom(

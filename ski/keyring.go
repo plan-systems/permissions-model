@@ -248,6 +248,21 @@ func (kr *keyring) GetCommunityKey(chanId plan.AccessChannelID) (
 	return key, keyId, nil
 }
 
+// GetCommunityKeyByID fetches the community key from the keychain for a
+// based on its ID, or an error if the key doesn't exist.
+func (kr *keyring) GetCommunityKeyByID(keyId plan.CommunityKeyID) (
+	plan.CommunityKey, error) {
+	var key plan.CommunityKey
+	kr.mux.RLock()
+	defer kr.mux.RUnlock()
+	key, ok := kr.communityKeys[keyId]
+	if !ok {
+		return key, plan.Errorf(-1,
+			"GetCommunityKeyByID: community key %v does not exist", keyId)
+	}
+	return key, nil
+}
+
 // GetCommunityKeyID fetches the ID of the community key from the
 // key chain for a specific channel, or an error if either the channel
 // or key doesn't exist.

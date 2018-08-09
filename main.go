@@ -6,6 +6,7 @@ import (
 
 	plan "github.com/plan-tools/go-plan/plan"
 	channel "github.com/plan-tools/permissions-model/channel"
+	pdi "github.com/plan-tools/permissions-model/pdi"
 	ski "github.com/plan-tools/permissions-model/ski"
 	user "github.com/plan-tools/permissions-model/user"
 )
@@ -15,11 +16,13 @@ var rootAccessChannelID = plan.AccessChannelID(plan.RootAccessChannel)
 
 func main() {
 
+	PDI := pdi.NewPDI()
+
 	// Alice bootstraps the community. Note that we need to create
 	// at least the root ChannelID before we can create our first user
 
 	// Alice creates herself and generates her own keypairs
-	alice, alicePubKey := user.NewUser("alice", rootAccessChannelID)
+	alice, alicePubKey := user.NewUser("alice", PDI)
 	fmt.Printf("new user: %v\n", alice)
 
 	// Alice creates the first community key
@@ -69,7 +72,7 @@ func main() {
 	// END NEEDS WORK
 
 	fmt.Println("* alice writes genesis entry and vouches for herself")
-	err = rootChannel.WriteVouchFor(alice, alicePubKey)
+	err = rootChannel.WriteVouchFor(alice.Addr, alice.SKI, alicePubKey)
 	if err != nil {
 		panic(err) // TODO: this whole thing should be a test suite
 	}
@@ -135,10 +138,10 @@ func main() {
 	}
 	fmt.Println(catalogChannel)
 
-	bob, _ := user.NewUser("bob", rootAccessChannelID)
+	bob, _ := user.NewUser("bob", PDI)
 	fmt.Printf("new user: %v\n", bob)
 
-	eve, _ := user.NewUser("eve", rootAccessChannelID)
+	eve, _ := user.NewUser("eve", PDI)
 	fmt.Printf("new user: %v\n", eve)
 
 }

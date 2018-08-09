@@ -8,50 +8,32 @@ import (
 
 	plan "github.com/plan-tools/go-plan/plan"
 	ski "github.com/plan-tools/permissions-model/ski"
-	user "github.com/plan-tools/permissions-model/user"
 )
 
 type Channel struct {
-	Properties *plan.ChannelProperties
-	Entries    []*plan.PDIEntryCrypt
-	mux        sync.RWMutex // synchronized changes to entries
-}
-
-// TODO: not wild about the name here
-// an AccessChannelReferenceEntry marks a revision of the access channel.
-// other PDIEntry blocks will reference AccessChannelReferenceEntry to
-// tell clients what CommunityKey to use and which identities have what
-// authorizations for the channel.
-type AccessChannelReferenceEntry struct {
-	CommunityKeyID plan.CommunityKeyID
-
-	// TODO: should we break this Members down to Owners, Writers, Readers?
-	Members map[plan.IdentityAddr]uint32 // this int32 is a rev ID
-}
-
-// an AccessChannelKeyEntry is a user's public key and the community key
-// encrypted for that public key
-type AccessChannelKeyEntry struct {
-	PublicKey         plan.IdentityPublicKey `json:"public_key"`
-	CommunityKeyCrypt []byte                 `json:"community_key_enc"`
-	communityKey      plan.CommunityKey      // unencrypted key, not serialized
+	Properties   *plan.ChannelProperties
+	Entries      []*plan.PDIEntry
+	EntriesCrypt []*plan.PDIEntryCrypt // TODO: get rid of this
+	mux          sync.RWMutex          // synchronized changes to entries
 }
 
 // Write takes a slice of cleartext PDIBodyPart, encrypts them
 // with the community key, and persists them to the channel using
 // community-key encrypted header metadata.
 func (c *Channel) Write(
-	author *user.User,
+	author plan.IdentityAddr,
+	authorSki *ski.SKI,
 	verb plan.PDIEntryVerb,
 	parts []*plan.PDIBodyPart,
 ) error {
 	accessChannelID := c.Properties.OwningAccessChannelID
-	encryptedBody, err := c.encryptBodyParts(author, accessChannelID, parts)
+	encryptedBody, err := c.encryptBodyParts(authorSki, accessChannelID, parts)
 	if err != nil {
 		return err
 	}
 	return c.writeEncryptedBody(
 		author,
+		authorSki,
 		verb,
 		accessChannelID,
 		encryptedBody,
@@ -62,19 +44,21 @@ func (c *Channel) Write(
 // with the recipient's public key, and persists them to the channel
 // using community-key encrypted header metadata.
 func (c *Channel) WriteFor(
-	author *user.User,
+	author plan.IdentityAddr,
+	authorSki *ski.SKI,
 	verb plan.PDIEntryVerb,
 	recipient plan.IdentityPublicKey,
 	parts []*plan.PDIBodyPart,
 ) error {
 	accessChannelID := c.Properties.OwningAccessChannelID
 	encryptedBody, err := c.encryptBodyPartsFor(
-		author, accessChannelID, recipient, parts)
+		authorSki, accessChannelID, recipient, parts)
 	if err != nil {
 		return err
 	}
 	return c.writeEncryptedBody(
 		author,
+		authorSki,
 		verb,
 		accessChannelID,
 		encryptedBody,
@@ -86,17 +70,21 @@ func (c *Channel) WriteFor(
 // The recipient can't decrypt the header until the body is decrypted first,
 // so the author's public key and channel ID are transmitted out-of-band in
 // the invitation.
-func (c *Channel) WriteVouchFor(author *user.User,
-	recipient plan.IdentityPublicKey) error {
+func (c *Channel) WriteVouchFor(
+	author plan.IdentityAddr,
+	authorSki *ski.SKI,
+	recipient plan.IdentityPublicKey,
+) error {
 	accessChannelID := c.Properties.OwningAccessChannelID
 
 	// note that the cleartext key never leaves the SKI!
-	encryptedBody, err := author.SKI.Vouch(accessChannelID, recipient)
+	encryptedBody, err := authorSki.Vouch(accessChannelID, recipient)
 	if err != nil {
 		return err
 	}
 	return c.writeEncryptedBody(
 		author,
+		authorSki,
 		plan.PDIEntryVerbChannelAdmin,
 		accessChannelID,
 		encryptedBody,
@@ -111,18 +99,18 @@ func (c *Channel) WriteVouchFor(author *user.User,
 // TODO: is there any need to mess with the header at all once we've
 //       read the vouch entry?
 func (c *Channel) AcceptVouch(
-	recv *user.User,
+	recvSki *ski.SKI,
 	vouchEncryptKey plan.IdentityPublicKey,
 	vouchSigningKey plan.IdentityPublicKey,
 	entryID int,
 ) error {
-	if len(c.Entries) < entryID+1 {
+	if len(c.EntriesCrypt) < entryID+1 {
 		return plan.Error(-1, "entry out of range")
 	}
-	encryptedEntry := c.Entries[entryID]
+	encryptedEntry := c.EntriesCrypt[entryID]
 	chanID := c.Properties.OwningAccessChannelID
 
-	_, ok := recv.SKI.Verify(
+	_, ok := recvSki.Verify(
 		vouchSigningKey, *encryptedEntry.Hash, encryptedEntry.Sig)
 	if !ok {
 		return plan.Error(-1, "invalid signature")
@@ -131,18 +119,18 @@ func (c *Channel) AcceptVouch(
 	// note: if we were just reading the message we could call
 	// DecryptFrom here but we don't want the key to leak out of
 	// the SKI
-	return recv.SKI.AcceptVouch(
+	return recvSki.AcceptVouch(
 		chanID, encryptedEntry.BodyCrypt, vouchEncryptKey)
 }
 
 // Read is the high-level method for reading an entry, where
 // the caller doesn't already know what keys or access channels
 // are involved and so has to pull it out from the entry header.
-func (c *Channel) Read(recv *user.User, entryID int) (*plan.PDIEntry, error) {
-	if len(c.Entries) < entryID+1 {
+func (c *Channel) Read(recvSki *ski.SKI, entryID int) (*plan.PDIEntry, error) {
+	if len(c.EntriesCrypt) < entryID+1 {
 		return nil, plan.Error(-1, "entry out of range")
 	}
-	encryptedEntry := c.Entries[entryID]
+	encryptedEntry := c.EntriesCrypt[entryID]
 
 	// 1. need to decrypt header to get signing key ID
 	// 2. need to get signing key from access channel
@@ -158,7 +146,7 @@ func (c *Channel) Read(recv *user.User, entryID int) (*plan.PDIEntry, error) {
 	// decrypt the header so we can get the author and access
 	// channel info
 
-	clearHeaderBuf, err := recv.SKI.Decrypt(chanID, encryptedEntry.HeaderCrypt)
+	clearHeaderBuf, err := recvSki.Decrypt(chanID, encryptedEntry.HeaderCrypt)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +164,7 @@ func (c *Channel) Read(recv *user.User, entryID int) (*plan.PDIEntry, error) {
 	// 	return plan.Error(-1, "invalid signature")
 	// }
 
-	// encryptedEntry := c.Entries[entryID]
+	// encryptedEntry := c.EntriesCrypt[entryID]
 
 	// sig := encryptedEntry.Sig
 	// hash := encryptedEntry.Hash
@@ -208,16 +196,18 @@ func (c *Channel) Read(recv *user.User, entryID int) (*plan.PDIEntry, error) {
 // internal: writes a previously-encrypted body to the PDI, with
 // the header encrypted with the community key
 func (c *Channel) writeEncryptedBody(
-	author *user.User,
+	author plan.IdentityAddr,
+	authorSki *ski.SKI,
 	verb plan.PDIEntryVerb,
 	accessChannelID plan.AccessChannelID,
 	encryptedBody []byte,
 ) error {
-	communityKeyID, err := author.SKI.GetCommunityKeyID(accessChannelID)
+	communityKeyID, err := authorSki.GetCommunityKeyID(accessChannelID)
 	if err != nil {
 		return err
 	}
-	encryptedHeader, err := c.encryptHeader(author, accessChannelID, verb)
+	encryptedHeader, err := c.encryptHeader(
+		author, authorSki, accessChannelID, verb)
 	if err != nil {
 		return err
 	}
@@ -227,7 +217,7 @@ func (c *Channel) writeEncryptedBody(
 		HeaderCrypt:    encryptedHeader,
 		BodyCrypt:      encryptedBody,
 	}
-	err = c.hashAndSign(author, accessChannelID, entryCrypt)
+	err = c.hashAndSign(authorSki, accessChannelID, entryCrypt)
 	if err != nil {
 		return err
 	}
@@ -241,7 +231,7 @@ func (c *Channel) writeEncryptedBody(
 
 // internal: serializes the parts and creates the encrypted body
 func (c *Channel) encryptBodyParts(
-	author *user.User,
+	authorSki *ski.SKI,
 	accessChannelID plan.AccessChannelID,
 	parts []*plan.PDIBodyPart,
 ) ([]byte, error) {
@@ -249,7 +239,7 @@ func (c *Channel) encryptBodyParts(
 	if err != nil {
 		return nil, err
 	}
-	encryptedBody, err := author.SKI.Encrypt(accessChannelID, bodyClear)
+	encryptedBody, err := authorSki.Encrypt(accessChannelID, bodyClear)
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +249,7 @@ func (c *Channel) encryptBodyParts(
 // internal: serializes the parts and creates the body encrypted for
 // a specific public key.
 func (c *Channel) encryptBodyPartsFor(
-	author *user.User,
+	authorSki *ski.SKI,
 	accessChannelID plan.AccessChannelID,
 	recipient plan.IdentityPublicKey,
 	parts []*plan.PDIBodyPart,
@@ -268,7 +258,7 @@ func (c *Channel) encryptBodyPartsFor(
 	if err != nil {
 		return nil, err
 	}
-	encryptedBody, err := author.SKI.EncryptFor(
+	encryptedBody, err := authorSki.EncryptFor(
 		accessChannelID, bodyClear, recipient)
 	if err != nil {
 		return nil, err
@@ -278,7 +268,8 @@ func (c *Channel) encryptBodyPartsFor(
 
 // internal: creates and serializes the header and then encrypts it.
 func (c *Channel) encryptHeader(
-	author *user.User,
+	author plan.IdentityAddr,
+	authorSki *ski.SKI,
 	accessChannelID plan.AccessChannelID,
 	verb plan.PDIEntryVerb,
 ) ([]byte, error) {
@@ -287,7 +278,7 @@ func (c *Channel) encryptHeader(
 		Time:             plan.Time(time.Now().Unix()),
 		Verb:             verb,
 		ChannelID:        c.Properties.ChannelID,
-		Author:           author.Addr,
+		Author:           author,
 		AccessChannelID:  accessChannelID,
 		AccessChannelRev: c.Properties.OwningAccessChannelRev,
 	}
@@ -295,7 +286,7 @@ func (c *Channel) encryptHeader(
 	if err != nil {
 		return []byte{}, err
 	}
-	encryptedHeader, err := author.SKI.Encrypt(accessChannelID, headerClear)
+	encryptedHeader, err := authorSki.Encrypt(accessChannelID, headerClear)
 	if err != nil {
 		return []byte{}, err
 	}
@@ -304,7 +295,7 @@ func (c *Channel) encryptHeader(
 
 // internal: computes the entry hash and signs it
 func (c *Channel) hashAndSign(
-	author *user.User,
+	authorSki *ski.SKI,
 	accessChannelID plan.AccessChannelID,
 	entryCrypt *plan.PDIEntryCrypt) error {
 
@@ -312,7 +303,7 @@ func (c *Channel) hashAndSign(
 	entryCrypt.ComputeHash(hash)
 	entryCrypt.Hash = hash
 
-	sig, err := author.SKI.Sign(accessChannelID, *hash)
+	sig, err := authorSki.Sign(accessChannelID, *hash)
 	if err != nil {
 		return err
 	}
@@ -329,9 +320,34 @@ func (c *Channel) append(entryCrypt *plan.PDIEntryCrypt) error {
 	if err != nil {
 		return err
 	}
-	c.Entries = append(c.Entries, entryCrypt)
+	c.EntriesCrypt = append(c.EntriesCrypt, entryCrypt)
 
 	// TODO: how do we want to persist to disk for this demo?
 	fmt.Printf("encrypted entry: %x...\n", entryCryptBuf[:30])
 	return nil
+}
+
+// -------------------------------------------------
+// round 2
+
+// Store appends the PDIEntry to the channel and returns the
+// index of the entity. Typically at this point the header has
+// been decrypted but not the body.
+func (c *Channel) Store(entry *plan.PDIEntry) uint32 {
+	c.mux.Lock()
+	defer c.mux.Unlock()
+	c.Entries = append(c.Entries, entry)
+	return uint32(len(c.Entries) - 1)
+}
+
+// Get is the low-level method for fetching a specific entry based
+// on its index.
+func (c *Channel) Get(entryID uint32) (*plan.PDIEntry, error) {
+	c.mux.RLock()
+	defer c.mux.RUnlock()
+	if uint32(len(c.Entries)) < entryID+1 {
+		return nil, plan.Error(-1, "entry out of range")
+	}
+	entry := c.Entries[entryID]
+	return entry, nil
 }
