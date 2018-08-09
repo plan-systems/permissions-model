@@ -2,35 +2,44 @@ MAKEFLAGS += --warn-undefined-variables
 SHELL := /bin/bash
 .SHELLFLAGS := -o pipefail -euc
 .DEFAULT_GOAL := build
+GOPATH := $(abspath $(shell pwd)/../../../..)
+
+help:
+	@echo -e "\033[32m"
+	@echo "This demo uses glide to manage its dependencies. Download the latest"
+	@echo "version from https://github.com/Masterminds/glide/releases"
+	@echo "Targets in this Makefile will set the GOPATH appropriately if the"
+	@echo "repository is within ./src/github.com/plan-tools/permissions-model"
+	@echo "Otherwise... good luck."
+	@echo "GOPATH=$(GOPATH)"
 
 # ----------------------------------------
 # working environment
 
-venv ?= $(shell echo $${WORKON_HOME:-.venv}/plan-permissions-model)
-OS := $(shell uname)
+GLIDE_ERR := "You need glide installed to set up this project. Download the latest version from https://github.com/Masterminds/glide/releases"
+check-glide:
+	@command -v glide || { echo $(GLIDE_ERR) ; exit 1;}
 
-# TODO: this is gross and overly specific right now b/c pynacl doesn't
-# have a binary wheel for python3.6 and getting cross-platform dependencies
-# set up was just more of a pain than I wanted to deal with for a PoC
+setup: check-glide
+	mkdir -p vendor
+	GOPATH=$(GOPATH) glide up
 
-$(venv):
-	test -d $(venv) || python3.5 -m venv $(venv)
-
-
-.PHONY: deps
-deps: requirements.txt
-	$(venv)/bin/pip install -Ur requirements.txt
-	touch $(venv)/bin/activate
-
-
-.PHONY: setup
-setup: $(venv) deps
-
-check:
-	cd model && $(venv)/bin/pylint *.py
+build:
+	GOPATH=$(GOPATH) go build -o demo main.go
 
 # ----------------------------------------
 # demo
 
 run:
-	cd model && $(venv)/bin/python ./demo.py
+	GOPATH=$(GOPATH) go run main.go
+
+# set a single package to test by passing the PKG variable
+PKG ?=
+ifeq ($(PKG), )
+PKG := ./...
+else
+PKG := github.com/plan-tools/permissions-model/$(PKG)
+endif
+
+test:
+	GOPATH=$(GOPATH) go test -v $(PKG)

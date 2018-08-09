@@ -1,2 +1,3 @@
-data/
-*.pyc
+# golang artifacts
+vendor/
+demo

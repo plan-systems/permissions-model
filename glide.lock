@@ -1,0 +1,24 @@
+hash: c68b31bb265db07144c090b56a5763b5afe113a57ad3e775168e9c89d0fde85e
+updated: 2018-08-09T08:45:53.338944383-04:00
+imports:
+- name: github.com/ethereum/go-ethereum
+  version: 7b5c3758250ffc78c7a5ce14c1b736a38d548423
+  subpackages:
+  - crypto/sha3
+- name: github.com/plan-tools/go-plan
+  version: faebdd989fd2361a8eaa0458d0e287e95e5b9f3f
+  subpackages:
+  - plan
+- name: golang.org/x/crypto
+  version: de0752318171da717af4ce24d0a2e8626afaeb11
+  subpackages:
+  - curve25519
+  - ed25519
+  - ed25519/internal/edwards25519
+  - internal/subtle
+  - nacl/box
+  - nacl/secretbox
+  - nacl/sign
+  - poly1305
+  - salsa20/salsa
+testImports: []
