@@ -17,8 +17,8 @@ func TestPDI(t *testing.T) {
 
 	// dummy client IDs
 	var (
-		alice = plan.IdentityAddr{1}
-		bob   = plan.IdentityAddr{2}
+		alice = 1
+		bob   = 2
 	)
 	pdi := NewPDI()
 

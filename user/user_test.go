@@ -14,40 +14,32 @@ func TestBootstrap(t *testing.T) {
 	PDI := pdi.NewPDI()
 
 	ch := setUpChannel(t)
-	chanId := ch.Properties.OwningAccessChannelID
 
-	alice, alicePubKey := NewUser("alice", PDI)
+	alice, aliceEncryptKey, aliceVerifyKey := NewUser("alice")
+	alicePnode := NewPnode(1, PDI)
+	alice.Login(alicePnode)
 	fmt.Println(alice)
 
-	aliceEncryptPubKey, aliceVerifyKey, err := alice.SKI.GetIdentity(chanId)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if aliceVerifyKey != alicePubKey {
-		t.Fatal("wtf")
-	}
-
-	err = ch.WriteVouchFor(alice.Addr, alice.SKI, aliceVerifyKey)
-	if err == nil {
-		t.Fatal("should have failed because community key not created")
-	}
-
 	communityKeyID := alice.SKI.NewCommunityKey()
-	err = alice.SKI.SetCommunityKey(chanId, communityKeyID)
-	if err != nil {
-		t.Fatal(err)
+
+	aliceAuthor := &channel.Author{
+		Addr:           alice.Addr,
+		SKI:            alice.SKI,
+		EncryptKey:     aliceEncryptKey,
+		SigningKey:     aliceVerifyKey,
+		CommunityKeyID: communityKeyID,
 	}
-	err = ch.WriteVouchFor(alice.Addr, alice.SKI, aliceVerifyKey)
+	err := ch.WriteVouchFor(aliceAuthor, aliceEncryptKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	bob, _ := NewUser("bob", PDI)
+	bob, bobEncryptKey, _ := NewUser("bob")
+	bobPnode := NewPnode(2, PDI)
+	bob.Login(bobPnode)
 	fmt.Println(bob)
 
-	bobEncryptPubKey, _, _ := bob.SKI.GetIdentity(chanId)
-
-	err = ch.WriteVouchFor(alice.Addr, alice.SKI, bobEncryptPubKey)
+	err = ch.WriteVouchFor(aliceAuthor, bobEncryptKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,8 +47,12 @@ func TestBootstrap(t *testing.T) {
 	// Bob gets the following out-of-band:
 	// - ID of Alice's key
 	// - rev of root chan
-
-	err = ch.AcceptVouch(bob.SKI, aliceEncryptPubKey, aliceVerifyKey, 1)
+	vouchPkg := &channel.VouchPackage{
+		EncryptKey: aliceEncryptKey,
+		SigningKey: aliceVerifyKey,
+		EntryID:    1,
+	}
+	err = ch.AcceptVouch(bob.SKI, bobEncryptKey, vouchPkg)
 	if err != nil {
 		t.Fatal(err)
 	}

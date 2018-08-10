@@ -11,37 +11,38 @@ import (
 // entries or push new entries to the same instance of PDI
 type PDI struct {
 	Entries []*plan.PDIEntryCrypt
-	clients map[plan.IdentityAddr]int // map of client IDs to their current position
+	clients map[int]int // map of pnode client IDs to their current position
 	mux     sync.RWMutex
 }
 
 func NewPDI() *PDI {
 	return &PDI{
 		Entries: []*plan.PDIEntryCrypt{},
-		clients: map[plan.IdentityAddr]int{},
+		clients: map[int]int{},
 	}
 }
 
 // Connect sets up the internal queue we need for the demo. The clientID
 // here has to be unique across pnodes, but in the real implementation
 // this would be over a unix socket or similar to the local PDI agent.
-func (p *PDI) Connect(clientID plan.IdentityAddr) {
+func (p *PDI) Connect(clientID int) {
 	p.mux.Lock()
 	defer p.mux.Unlock()
 	p.clients[clientID] = 0
 }
 
 // Push appends a new entry to the PDI
-func (p *PDI) Push(entry *plan.PDIEntryCrypt) {
+func (p *PDI) Push(entry *plan.PDIEntryCrypt) uint32 {
 	p.mux.Lock()
 	defer p.mux.Unlock()
 	p.Entries = append(p.Entries, entry)
+	return uint32(len(p.Entries) - 1)
 }
 
 // Peek gets the next entry that a client hasn't seen and updates
 // internal state so that subsequent calls to Peek will get the
 // next entry.
-func (p *PDI) Peek(clientID plan.IdentityAddr) (*plan.PDIEntryCrypt, error) {
+func (p *PDI) Peek(clientID int) (*plan.PDIEntryCrypt, error) {
 	p.mux.Lock()
 	defer p.mux.Unlock()
 	pos, ok := p.clients[clientID]
@@ -67,7 +68,7 @@ func (p *PDI) Get(pos int) (*plan.PDIEntryCrypt, error) {
 
 // SetClientIndex changes the position of the client but
 // does not get any new data
-func (p *PDI) SetClientIndex(clientID plan.IdentityAddr, pos int) error {
+func (p *PDI) SetClientIndex(clientID, pos int) error {
 	p.mux.Lock()
 	defer p.mux.Unlock()
 	_, ok := p.clients[clientID]

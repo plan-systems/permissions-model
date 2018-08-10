@@ -2,12 +2,10 @@ package main
 
 import (
 	"fmt"
-	"time"
 
 	plan "github.com/plan-tools/go-plan/plan"
 	channel "github.com/plan-tools/permissions-model/channel"
 	pdi "github.com/plan-tools/permissions-model/pdi"
-	ski "github.com/plan-tools/permissions-model/ski"
 	user "github.com/plan-tools/permissions-model/user"
 )
 
@@ -22,15 +20,13 @@ func main() {
 	// at least the root ChannelID before we can create our first user
 
 	// Alice creates herself and generates her own keypairs
-	alice, alicePubKey := user.NewUser("alice", PDI)
+	alice, aliceEncryptKey, aliceSigningKey := user.NewUser("alice")
+	alicePnode := user.NewPnode(1, PDI)
+	alice.Login(alicePnode)
 	fmt.Printf("new user: %v\n", alice)
 
 	// Alice creates the first community key
 	communityKeyID := alice.SKI.NewCommunityKey()
-	err := alice.SKI.SetCommunityKey(rootAccessChannelID, communityKeyID)
-	if err != nil {
-		panic(err)
-	}
 
 	// Alice now can create the root access channel
 	rootChannel := &channel.Channel{
@@ -71,8 +67,16 @@ func main() {
 
 	// END NEEDS WORK
 
+	aliceAuthor := &channel.Author{
+		Addr:           alice.Addr,
+		SKI:            alice.SKI,
+		EncryptKey:     aliceEncryptKey,
+		SigningKey:     aliceSigningKey,
+		CommunityKeyID: communityKeyID,
+	}
+
 	fmt.Println("* alice writes genesis entry and vouches for herself")
-	err = rootChannel.WriteVouchFor(alice.Addr, alice.SKI, alicePubKey)
+	err := rootChannel.WriteVouchFor(aliceAuthor, aliceEncryptKey)
 	if err != nil {
 		panic(err) // TODO: this whole thing should be a test suite
 	}
@@ -91,57 +95,61 @@ func main() {
 	// starts adding other members and she can wait to do this until she's
 	// added them (but they won't be able to participate until she's done so).
 
-	rootRev2 := plan.PDIEntry{
-		Header: &plan.PDIEntryHeader{
-			Nonce:            <-ski.Nonces,
-			Time:             plan.Time(time.Now().Unix()),
-			Verb:             plan.PDIEntryVerbChannelAdmin,
-			ChannelID:        plan.RootAccessChannel,
-			Author:           alice.Addr,
-			AccessChannelID:  plan.AccessChannelID(plan.RootAccessChannel),
-			AccessChannelRev: 0, // need to be *signed* under rev0
-		},
-		Body: &plan.PDIEntryBody{
-			Nonce:     <-ski.Nonces,
-			BodyParts: []plan.PDIBodyPart{}, // TODO: need rev2 body here
-		},
-	}
-	fmt.Println(rootRev2) // TODO: persist entry
+	// rootRev2 := plan.PDIEntry{
+	// 	Header: &plan.PDIEntryHeader{
+	// 		Nonce:            <-ski.Nonces,
+	// 		Time:             plan.Time(time.Now().Unix()),
+	// 		Verb:             plan.PDIEntryVerbChannelAdmin,
+	// 		ChannelID:        plan.RootAccessChannel,
+	// 		Author:           alice.Addr,
+	// 		AccessChannelID:  plan.AccessChannelID(plan.RootAccessChannel),
+	// 		AccessChannelRev: 0, // need to be *signed* under rev0
+	// 	},
+	// 	Body: &plan.PDIEntryBody{
+	// 		Nonce:     <-ski.Nonces,
+	// 		BodyParts: []plan.PDIBodyPart{}, // TODO: need rev2 body here
+	// 	},
+	// }
+	// fmt.Println(rootRev2) // TODO: persist entry
 
-	// Alice creates a membership registry and adds herself to it
+	// // Alice creates a membership registry and adds herself to it
 
-	memberChannel := &channel.Channel{
-		Properties: &plan.ChannelProperties{
-			Author:                 alice.Addr,
-			IsAccessChannel:        false,
-			EntriesAreFinal:        false,
-			ChannelID:              plan.MemberRegistryChannel,
-			OwningAccessChannelID:  rootAccessChannelID,
-			OwningAccessChannelRev: 0,
-		},
-	}
-	fmt.Println(memberChannel)
+	// memberChannel := &channel.Channel{
+	// 	Properties: &plan.ChannelProperties{
+	// 		Author:                 alice.Addr,
+	// 		IsAccessChannel:        false,
+	// 		EntriesAreFinal:        false,
+	// 		ChannelID:              plan.MemberRegistryChannel,
+	// 		OwningAccessChannelID:  rootAccessChannelID,
+	// 		OwningAccessChannelRev: 0,
+	// 	},
+	// }
+	// fmt.Println(memberChannel)
 
-	// TODO: add entry for Alice
+	// // TODO: add entry for Alice
 
-	// Alice creates the channel catalog. so far it has no entries
+	// // Alice creates the channel catalog. so far it has no entries
 
-	catalogChannel := &channel.Channel{
-		Properties: &plan.ChannelProperties{
-			Author:                 alice.Addr,
-			IsAccessChannel:        false,
-			EntriesAreFinal:        false,
-			ChannelID:              plan.ChannelCatalogChannel,
-			OwningAccessChannelID:  rootAccessChannelID,
-			OwningAccessChannelRev: 0,
-		},
-	}
-	fmt.Println(catalogChannel)
+	// catalogChannel := &channel.Channel{
+	// 	Properties: &plan.ChannelProperties{
+	// 		Author:                 alice.Addr,
+	// 		IsAccessChannel:        false,
+	// 		EntriesAreFinal:        false,
+	// 		ChannelID:              plan.ChannelCatalogChannel,
+	// 		OwningAccessChannelID:  rootAccessChannelID,
+	// 		OwningAccessChannelRev: 0,
+	// 	},
+	// }
+	// fmt.Println(catalogChannel)
 
-	bob, _ := user.NewUser("bob", PDI)
+	bob, _, _ := user.NewUser("bob")
+	bobPnode := user.NewPnode(2, PDI)
+	bob.Login(bobPnode)
 	fmt.Printf("new user: %v\n", bob)
 
-	eve, _ := user.NewUser("eve", PDI)
+	eve, _, _ := user.NewUser("eve")
+	evePnode := user.NewPnode(3, PDI)
+	eve.Login(evePnode)
 	fmt.Printf("new user: %v\n", eve)
 
 }
