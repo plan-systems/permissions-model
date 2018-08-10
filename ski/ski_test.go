@@ -1,4 +1,4 @@
-package ski
+package ski // import "github.com/plan-tools/permissions-model/ski"
 
 import (
 	"bytes"
@@ -62,7 +62,7 @@ func TestSigning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verified, ok := recvSki.Verify(senderSignPubKey, *hash, NewSig(sig))
+	verified, ok := recvSki.Verify(senderSignPubKey, *hash, sig)
 	if !ok {
 		t.Fatalf("signature verification failed: %x", verified)
 	}

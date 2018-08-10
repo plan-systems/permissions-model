@@ -1,4 +1,4 @@
-package ski
+package ski // import "github.com/plan-tools/permissions-model/ski"
 
 import (
 	crypto_rand "crypto/rand"
@@ -90,7 +90,7 @@ func generateEncryptionKey() (plan.IdentityPublicKey, *[32]byte) {
 	if err != nil {
 		panic(err)
 	}
-	return NewPubKey(publicKey), privateKey
+	return newPubKey(publicKey), privateKey
 }
 
 func generateSigningKey() (plan.IdentityPublicKey, *[64]byte) {
@@ -98,7 +98,7 @@ func generateSigningKey() (plan.IdentityPublicKey, *[64]byte) {
 	if err != nil {
 		panic(err)
 	}
-	return NewPubKey(publicKey), privateKey
+	return newPubKey(publicKey), privateKey
 }
 
 // ---------------------------------------------------------

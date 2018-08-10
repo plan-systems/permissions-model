@@ -1,4 +1,4 @@
-package ski
+package ski // import "github.com/plan-tools/permissions-model/ski"
 
 import (
 	crypto_rand "crypto/rand"
@@ -12,7 +12,7 @@ import (
 // for our security properties to hold.
 // Let's circle back to this in the real implementation.
 
-var Nonces = NonceGenerator()
+var nonces = nonceGenerator()
 
 // needed by the SKI to cast our typedef
 func nonceToArray(n plan.Nonce) *[24]byte {
@@ -21,7 +21,7 @@ func nonceToArray(n plan.Nonce) *[24]byte {
 	return &arr
 }
 
-func NonceGenerator() <-chan plan.Nonce {
+func nonceGenerator() <-chan plan.Nonce {
 	nonceChan := make(chan plan.Nonce) // note: *must* be a blocking chan!
 	go func() {
 		for {

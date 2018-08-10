@@ -1,4 +1,8 @@
-package ski
+// Package ski is a demonstration of the SKI plugin, implemented in go.
+// With some additional work and review this package could be wrapped in a
+// binary that communicates over a socket to serve as a reference for
+// other SKI implementers.
+package ski // import "github.com/plan-tools/permissions-model/ski"
 
 import (
 	"encoding/json"
@@ -9,11 +13,12 @@ import (
 	sign "golang.org/x/crypto/nacl/sign"
 )
 
-// SKI represents the external SKI process
+// SKI represents the external SKI process and holds the keyring.
 type SKI struct {
 	keyring *keyring
 }
 
+// NewSKI initializes the SKI's keying.
 func NewSKI() *SKI {
 	ski := &SKI{keyring: newKeyring()}
 	return ski
@@ -27,8 +32,8 @@ func NewSKI() *SKI {
 // required, and reduce the knowledge the SKI has about what's being done
 // with these values.
 
-// given a user's encryption public key, Vouch encrypts a CommunityKey
-// for that user's public key, and returns the encrypted buffer (or error)
+// Vouch encrypts a CommunityKey for the recipients public encryption key,
+// and returns the encrypted buffer (or error)
 func (ski *SKI) Vouch(
 	communityKeyID plan.CommunityKeyID,
 	senderPubKey plan.IdentityPublicKey,
@@ -60,12 +65,13 @@ func (ski *SKI) Vouch(
 	return ski.EncryptFor(senderPubKey, msg, recvPubKey)
 }
 
+// AcceptVouch decrypts the encrypted buffer written by Vouch and decrypts
+// it for the recipient.
 func (ski *SKI) AcceptVouch(
 	recvPubKey plan.IdentityPublicKey,
 	bodyCrypt []byte,
 	senderPubKey plan.IdentityPublicKey,
 ) error {
-
 	msg, err := ski.DecryptFrom(recvPubKey, bodyCrypt, senderPubKey)
 	if err != nil {
 		return err
@@ -84,31 +90,31 @@ func (ski *SKI) AcceptVouch(
 	return nil
 }
 
+// internal: the message sent by the Vouch process
 type vouchMessage struct {
 	KeyID plan.CommunityKeyID
 	Key   plan.CommunityKey
 }
 
-// given the hash of a message, Sign signs the hash and returns the
-// signature
+// Sign accepts a message hash and returns a signature.
 func (ski *SKI) Sign(signer plan.IdentityPublicKey, hash plan.PDIEntryHash,
-) ([]byte, error) {
+) (plan.PDIEntrySig, error) {
 	privateKey, err := ski.keyring.GetSigningKey(signer)
 	if err != nil {
-		return []byte{}, err
+		return plan.PDIEntrySig{}, err
 	}
 	signed := sign.Sign([]byte{}, hash[:], privateKey)
-	return signed[:64], nil
+	return newSig(signed[:64]), nil
 }
 
-// given a buffer, Encrypt encrypts it with the community key and
-// returns the encrypted buffer (or an error). Typically the msg buffer
-// will be a serialized PDIEntryBody or PDIEntryHeader. This is
-// authenticated encryption but the caller will follow this call with a
-// call to Sign the PDIEntryHash for validation
+// Encrypt accepts a buffer and encrypts it with the community key and returns
+// the encrypted buffer (or an error). Typically the msg buffer will be a
+// serialized PDIEntryBody or PDIEntryHeader. This is authenticated encryption
+// but the caller will follow this call with a call to Verify the PDIEntryHash
+// for validation.
 func (ski *SKI) Encrypt(keyId plan.CommunityKeyID, msg []byte,
 ) ([]byte, error) {
-	nonce := <-Nonces
+	nonce := <-nonces
 	communityKey, err := ski.keyring.GetCommunityKeyByID(keyId)
 	if err != nil {
 		return []byte{}, err
@@ -118,20 +124,19 @@ func (ski *SKI) Encrypt(keyId plan.CommunityKeyID, msg []byte,
 	return encrypted, nil
 }
 
-// given a buffer, EncryptFor encrypts it for the public key of the
-// intended recipient and returns the encrypted buffer. Typically the
-// msg buffer will be a serialized PDIEntryBody or PDIEntryHeader.
-// Note: this is how the Vouch operation works under the hood except
-// that the Vouch caller doesn't know what goes in the message body.
-// Outside of Vouch operations, this is the basis of private messages
-// between users. The caller will follow this call with a call to Sign
-// the PDIEntryHash
+// EncryptFor accepts a buffer and encrypts it for the public key of the
+// intended recipient and returns the encrypted buffer. Typically the msg
+// buffer will be a serialized PDIEntryBody or PDIEntryHeader. Note: this
+// is how the Vouch operation works under the hood except that the Vouch
+// caller doesn't know what goes in the message body. Outside of Vouch
+// operations, this is the basis of private messages between users. The
+// caller will follow this call with a call to Sign the PDIEntryHash
 func (ski *SKI) EncryptFor(
 	senderPubKey plan.IdentityPublicKey,
 	msg []byte,
 	recvPubKey plan.IdentityPublicKey,
 ) ([]byte, error) {
-	nonce := <-Nonces
+	nonce := <-nonces
 	privateKey, err := ski.keyring.GetEncryptKey(senderPubKey)
 	if err != nil {
 		return []byte{}, err
@@ -141,16 +146,17 @@ func (ski *SKI) EncryptFor(
 	return encrypted, nil
 }
 
-// TODO: this probably doesn't need to be in the SKI because it doesn't
-//       require any private key material?
-// given a public key and a PDIEntrySig, verify the signature. returns
-// the verified buffer (so it can be compared by the caller) and a bool
-// indicating success.
+// Verify accepts a signature and verfies it against the public key of the
+// sender. Returns the verified buffer (so it can be compared by the caller)
+// and a bool indicating success.
 func (ski *SKI) Verify(
 	pubKey plan.IdentityPublicKey,
 	hash plan.PDIEntryHash,
 	sig plan.PDIEntrySig,
 ) ([]byte, bool) {
+	// TODO: this probably doesn't need to be in the SKI because it doesn't
+	//       require any private key material?
+
 	// need to re-combine the sig and hash to produce the
 	// signed message that Open expects
 	var signedMsg []byte
@@ -160,8 +166,8 @@ func (ski *SKI) Verify(
 	return verified, ok
 }
 
-// given an encrypted buffer, Decrypt decrypts it using
-// the community key and returns the cleartext buffer
+// Decrypt takes an encrypted buffer and decrypts it using the community key
+// and returns the cleartext buffer (or an error).
 func (ski *SKI) Decrypt(
 	keyID plan.CommunityKeyID,
 	encrypted []byte,
@@ -181,8 +187,9 @@ func (ski *SKI) Decrypt(
 	return decrypted, nil
 }
 
-// given an encrypted buffer and a public key, DecryptFrom decrypts it
-// using the user's private key and returns the decrypted buffer
+// DecryptFrom takes an encrypted buffer and a public key, and decrypts the
+// message using the recipients private key. It returns the decrypted buffer
+// (or an error).
 func (ski *SKI) DecryptFrom(
 	recvPubKey plan.IdentityPublicKey,
 	encrypted []byte,
@@ -210,9 +217,9 @@ func (ski *SKI) DecryptFrom(
 // NewIdentity generates encryption and signing keys, adds them to the
 // keyring, and returns the public keys associated with those private
 // keys as (encryption, signing).
-// TODO: I don't like the return signature here. too easy to screw up
 func (ski *SKI) NewIdentity() (
 	plan.IdentityPublicKey, plan.IdentityPublicKey) {
+	// TODO: I don't like the return signature here. too easy to screw up
 	return ski.keyring.NewIdentity()
 }
 
@@ -231,14 +238,14 @@ func (ski *SKI) NewCommunityKey() plan.CommunityKeyID {
 //
 
 // TODO: we'll want to make this a method on plan.PDIEntrySig
-func NewSig(arr []byte) plan.PDIEntrySig {
+func newSig(arr []byte) plan.PDIEntrySig {
 	sig := plan.PDIEntrySig{}
 	copy(sig[:], arr[:64])
 	return sig
 }
 
 // TODO: we'll want to make this a method on plan.IdentityPublicKey
-func NewPubKey(arr *[32]byte) plan.IdentityPublicKey {
+func newPubKey(arr *[32]byte) plan.IdentityPublicKey {
 	k := plan.IdentityPublicKey{}
 	copy(k[:], arr[:32])
 	return k
