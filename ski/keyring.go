@@ -14,7 +14,6 @@ type keyring struct {
 	communityKeys map[plan.CommunityKeyID]plan.CommunityKey
 	signingKeys   map[plan.IdentityPublicKey]*[64]byte
 	encryptKeys   map[plan.IdentityPublicKey]*[32]byte
-	channels      map[plan.AccessChannelID]*channelKeygroup
 	mux           sync.RWMutex // synchronized changes to the keyring
 }
 
@@ -23,17 +22,7 @@ func newKeyring() *keyring {
 		communityKeys: map[plan.CommunityKeyID]plan.CommunityKey{},
 		signingKeys:   map[plan.IdentityPublicKey]*[64]byte{},
 		encryptKeys:   map[plan.IdentityPublicKey]*[32]byte{},
-		channels:      map[plan.AccessChannelID]*channelKeygroup{},
 	}
-}
-
-// channelKeygroup represents the set of community and public keys that a
-// user has associated with a particular Channel, typically mapped by
-// AccessChannelID.
-type channelKeygroup struct {
-	CommunityKeyID   plan.CommunityKeyID
-	SigningPublicKey plan.IdentityPublicKey
-	EncryptPublicKey plan.IdentityPublicKey
 }
 
 // ---------------------------------------------------------
@@ -42,8 +31,7 @@ type channelKeygroup struct {
 
 // NewIdentity generates encryption and signing keys, adds them to the
 // keyring, and returns the public keys associated with those private
-// keys. The caller will want to call SetIdentity to associate these
-// keys with a specific channel.
+// keys.
 func (kr *keyring) NewIdentity() (plan.IdentityPublicKey, plan.IdentityPublicKey) {
 
 	// generate new key material
@@ -58,84 +46,34 @@ func (kr *keyring) NewIdentity() (plan.IdentityPublicKey, plan.IdentityPublicKey
 	return encryptPubKey, signingPubKey
 }
 
-// SetIdentity assigns existing public keys to a specific existing channel.
-// Creates the channel keychain references if it doesn't exist, but returns
-// an error if either public key does not exist.
-func (kr *keyring) SetIdentity(
-	id plan.AccessChannelID,
-	encryptKey plan.IdentityPublicKey,
-	signingKey plan.IdentityPublicKey) error {
-
-	kr.mux.Lock()
-	defer kr.mux.Unlock()
-	channel, ok := kr.channels[id] // creates a new channel if needed
-	if !ok {
-		channel = &channelKeygroup{}
-		kr.channels[id] = channel
-	}
-
-	// assert these are real keys we've previously created
-	_, ok = kr.signingKeys[signingKey]
-	if !ok {
-		return plan.Errorf(-1,
-			"SetIdentity: signing key %v does not exist", signingKey)
-	}
-	_, ok = kr.encryptKeys[encryptKey]
-	if !ok {
-		return plan.Errorf(-1,
-			"SetIdentity: encryption key %v does not exist", encryptKey)
-	}
-	channel.SigningPublicKey = signingKey
-	channel.EncryptPublicKey = encryptKey
-	return nil
-}
-
 // GetSigningKey fetches the user's private signing key from the keychain for a
-// specific channel, or an error if either the channel or key doesn't exist.
-func (kr *keyring) GetSigningKey(chanId plan.AccessChannelID) (
-	*[64]byte, plan.IdentityPublicKey, error) {
-	var (
-		key    *[64]byte
-		pubKey plan.IdentityPublicKey
-	)
+// specific public key, or an error if the key doesn't exist.
+func (kr *keyring) GetSigningKey(pubKey plan.IdentityPublicKey) (
+	*[64]byte, error) {
+	var key *[64]byte
 	kr.mux.RLock()
 	defer kr.mux.RUnlock()
-	channel, ok := kr.channels[chanId]
+	key, ok := kr.signingKeys[pubKey]
 	if !ok {
-		return key, pubKey, plan.Errorf(-1,
-			"GetSigningKey: channel %v does not exist", chanId)
-	}
-	pubKey = channel.SigningPublicKey
-	key, ok = kr.signingKeys[pubKey]
-	if !ok {
-		return key, pubKey, plan.Errorf(-1,
+		return key, plan.Errorf(-1,
 			"GetSigningKey: signing key %v does not exist", pubKey)
 	}
-	return key, pubKey, nil
+	return key, nil
 }
 
-// GetEncryptKey fetches the user's private encrypt key from the keychain for a
-// specific channel, or an error if either the channel or key doesn't exist.
-func (kr *keyring) GetEncryptKey(chanId plan.AccessChannelID) (
-	*[32]byte, plan.IdentityPublicKey, error) {
-	var (
-		key    *[32]byte
-		pubKey plan.IdentityPublicKey
-	)
+// GetEncryptKey fetches the user's private encrypt key from the keychain,
+// or an error if the key doesn't exist.
+func (kr *keyring) GetEncryptKey(pubKey plan.IdentityPublicKey) (
+	*[32]byte, error) {
+	var key *[32]byte
 	kr.mux.RLock()
 	defer kr.mux.RUnlock()
-	channel, ok := kr.channels[chanId]
+	key, ok := kr.encryptKeys[pubKey]
 	if !ok {
-		return key, pubKey, plan.Errorf(-1,
-			"GetEncryptKey: channel %v does not exist", chanId)
-	}
-	pubKey = channel.EncryptPublicKey
-	key, ok = kr.encryptKeys[pubKey]
-	if !ok {
-		return key, pubKey, plan.Errorf(-1,
+		return key, plan.Errorf(-1,
 			"GetEncryptKey: encrypt key %v does not exist", pubKey)
 	}
-	return key, pubKey, nil
+	return key, nil
 }
 
 // Removes any instance of a key associated with the public key provided
@@ -145,14 +83,6 @@ func (kr *keyring) InvalidateIdentity(key plan.IdentityPublicKey) {
 	defer kr.mux.Unlock()
 	delete(kr.signingKeys, key)
 	delete(kr.encryptKeys, key)
-	for _, group := range kr.channels {
-		if group.SigningPublicKey == key {
-			group.SigningPublicKey = plan.IdentityPublicKey{}
-		}
-		if group.EncryptPublicKey == key {
-			group.EncryptPublicKey = plan.IdentityPublicKey{}
-		}
-	}
 }
 
 func generateEncryptionKey() (plan.IdentityPublicKey, *[32]byte) {
@@ -176,8 +106,7 @@ func generateSigningKey() (plan.IdentityPublicKey, *[64]byte) {
 //
 
 // NewCommunityKey generates a new community key, adds it to the keyring,
-// and returns the CommunityKeyID associated with that key. The caller will
-// want to call SetCommunityKey to associate the key with a specific channel.
+// and returns the CommunityKeyID associated with that key.
 func (kr *keyring) NewCommunityKey() plan.CommunityKeyID {
 	kr.mux.Lock()
 	defer kr.mux.Unlock()
@@ -186,66 +115,12 @@ func (kr *keyring) NewCommunityKey() plan.CommunityKeyID {
 	return keyId
 }
 
-// SetCommunityKey assigns an existing community key to a specific existing
-// channel. Returns an error if either the channel keychain reference or the
-// community key don't already exist.
-func (kr *keyring) SetCommunityKey(
-	chanId plan.AccessChannelID, keyId plan.CommunityKeyID) error {
-	kr.mux.Lock()
-	defer kr.mux.Unlock()
-	return kr.setKeyId(chanId, keyId)
-}
-
-// internal: setCommunityKeyFrom assigns a new community key to a specific
-// existing channel. Returns an error if either the channel keychain reference
-// or the community key don't already exist.
-func (kr *keyring) setCommunityKeyFrom(
-	chanId plan.AccessChannelID, keyId plan.CommunityKeyID, key plan.CommunityKey) error {
+// InstallCommunityKey adds a new community key to the keychain
+func (kr *keyring) InstallCommunityKey(
+	keyId plan.CommunityKeyID, key plan.CommunityKey) {
 	kr.mux.Lock()
 	defer kr.mux.Unlock()
 	kr.communityKeys[keyId] = key
-	return kr.setKeyId(chanId, keyId)
-}
-
-// internal: setKeyId assigns an existing community key ID to a specific existing
-// channel. Returns an error if either the channel keychain reference or the
-// community key don't already exist. *IMPORTANT: caller must lock the keyring.*
-func (kr *keyring) setKeyId(
-	chanId plan.AccessChannelID, keyId plan.CommunityKeyID) error {
-	channel, ok := kr.channels[chanId]
-	if !ok {
-		return plan.Errorf(-1,
-			"SetCommunityKey: channel %v does not exist", chanId)
-	}
-	_, ok = kr.communityKeys[keyId]
-	if !ok {
-		return plan.Errorf(-1,
-			"SetCommunityKey: community key %v does not exist", keyId)
-	}
-	channel.CommunityKeyID = keyId
-	return nil
-}
-
-// GetCommunityKey fetches the community key from the keychain for a
-// specific channel, or an error if either the channel or key doesn't exist.
-func (kr *keyring) GetCommunityKey(chanId plan.AccessChannelID) (
-	plan.CommunityKey, plan.CommunityKeyID, error) {
-	var (
-		key   plan.CommunityKey
-		keyId plan.CommunityKeyID
-	)
-	keyId, err := kr.GetCommunityKeyID(chanId)
-	if err != nil {
-		return key, keyId, err
-	}
-	kr.mux.RLock()
-	defer kr.mux.RUnlock()
-	key, ok := kr.communityKeys[keyId]
-	if !ok {
-		return key, keyId, plan.Errorf(-1,
-			"GetCommunityKey: community key %v does not exist", keyId)
-	}
-	return key, keyId, nil
 }
 
 // GetCommunityKeyByID fetches the community key from the keychain for a
@@ -261,23 +136,6 @@ func (kr *keyring) GetCommunityKeyByID(keyId plan.CommunityKeyID) (
 			"GetCommunityKeyByID: community key %v does not exist", keyId)
 	}
 	return key, nil
-}
-
-// GetCommunityKeyID fetches the ID of the community key from the
-// key chain for a specific channel, or an error if either the channel
-// or key doesn't exist.
-func (kr *keyring) GetCommunityKeyID(chanId plan.AccessChannelID) (
-	plan.CommunityKeyID, error) {
-	kr.mux.RLock()
-	defer kr.mux.RUnlock()
-	var keyId plan.CommunityKeyID
-	channel, ok := kr.channels[chanId]
-	if !ok {
-		return keyId, plan.Errorf(-1,
-			"SetCommunityKey: channel %v does not exist", chanId)
-	}
-	keyId = channel.CommunityKeyID
-	return keyId, nil
 }
 
 func generateSymmetricKey() ([32]byte, plan.CommunityKeyID) {

@@ -27,13 +27,14 @@ func NewSKI() *SKI {
 // required, and reduce the knowledge the SKI has about what's being done
 // with these values.
 
-// given a user's encryption public key, Vouch encrypts the channel's
-// CommunityKey for that user's public key, and returns the encrypted
-// buffer (or an error)
-func (ski *SKI) Vouch(chanId plan.AccessChannelID, pubKey plan.IdentityPublicKey,
+// given a user's encryption public key, Vouch encrypts a CommunityKey
+// for that user's public key, and returns the encrypted buffer (or error)
+func (ski *SKI) Vouch(
+	communityKeyID plan.CommunityKeyID,
+	senderPubKey plan.IdentityPublicKey,
+	recvPubKey plan.IdentityPublicKey,
 ) ([]byte, error) {
-
-	communityKey, communityKeyID, err := ski.keyring.GetCommunityKey(chanId)
+	communityKey, err := ski.keyring.GetCommunityKeyByID(communityKeyID)
 	if err != nil {
 		return []byte{}, err
 	}
@@ -42,7 +43,6 @@ func (ski *SKI) Vouch(chanId plan.AccessChannelID, pubKey plan.IdentityPublicKey
 	if err != nil {
 		return []byte{}, err
 	}
-
 	pdiMsgBody := &plan.PDIEntryBody{
 		BodyParts: []plan.PDIBodyPart{
 			plan.PDIBodyPart{
@@ -57,16 +57,16 @@ func (ski *SKI) Vouch(chanId plan.AccessChannelID, pubKey plan.IdentityPublicKey
 	if err != nil {
 		return []byte{}, err
 	}
-	return ski.EncryptFor(chanId, msg, pubKey)
+	return ski.EncryptFor(senderPubKey, msg, recvPubKey)
 }
 
 func (ski *SKI) AcceptVouch(
-	chanID plan.AccessChannelID,
+	recvPubKey plan.IdentityPublicKey,
 	bodyCrypt []byte,
 	senderPubKey plan.IdentityPublicKey,
 ) error {
 
-	msg, err := ski.DecryptFrom(chanID, bodyCrypt, senderPubKey)
+	msg, err := ski.DecryptFrom(recvPubKey, bodyCrypt, senderPubKey)
 	if err != nil {
 		return err
 	}
@@ -80,7 +80,7 @@ func (ski *SKI) AcceptVouch(
 	if err != nil {
 		return err
 	}
-	ski.keyring.setCommunityKeyFrom(chanID, keyMsgBody.KeyID, keyMsgBody.Key)
+	ski.keyring.InstallCommunityKey(keyMsgBody.KeyID, keyMsgBody.Key)
 	return nil
 }
 
@@ -91,9 +91,9 @@ type vouchMessage struct {
 
 // given the hash of a message, Sign signs the hash and returns the
 // signature
-func (ski *SKI) Sign(chanId plan.AccessChannelID, hash plan.PDIEntryHash,
+func (ski *SKI) Sign(signer plan.IdentityPublicKey, hash plan.PDIEntryHash,
 ) ([]byte, error) {
-	privateKey, _, err := ski.keyring.GetSigningKey(chanId)
+	privateKey, err := ski.keyring.GetSigningKey(signer)
 	if err != nil {
 		return []byte{}, err
 	}
@@ -106,10 +106,10 @@ func (ski *SKI) Sign(chanId plan.AccessChannelID, hash plan.PDIEntryHash,
 // will be a serialized PDIEntryBody or PDIEntryHeader. This is
 // authenticated encryption but the caller will follow this call with a
 // call to Sign the PDIEntryHash for validation
-func (ski *SKI) Encrypt(chanId plan.AccessChannelID, msg []byte,
+func (ski *SKI) Encrypt(keyId plan.CommunityKeyID, msg []byte,
 ) ([]byte, error) {
 	nonce := <-Nonces
-	communityKey, _, err := ski.keyring.GetCommunityKey(chanId)
+	communityKey, err := ski.keyring.GetCommunityKeyByID(keyId)
 	if err != nil {
 		return []byte{}, err
 	}
@@ -127,12 +127,12 @@ func (ski *SKI) Encrypt(chanId plan.AccessChannelID, msg []byte,
 // between users. The caller will follow this call with a call to Sign
 // the PDIEntryHash
 func (ski *SKI) EncryptFor(
-	chanId plan.AccessChannelID,
+	senderPubKey plan.IdentityPublicKey,
 	msg []byte,
 	recvPubKey plan.IdentityPublicKey,
 ) ([]byte, error) {
 	nonce := <-Nonces
-	privateKey, _, err := ski.keyring.GetEncryptKey(chanId)
+	privateKey, err := ski.keyring.GetEncryptKey(senderPubKey)
 	if err != nil {
 		return []byte{}, err
 	}
@@ -161,29 +161,8 @@ func (ski *SKI) Verify(
 }
 
 // given an encrypted buffer, Decrypt decrypts it using
-// the community key for the channel and returns the cleartext buffer
+// the community key and returns the cleartext buffer
 func (ski *SKI) Decrypt(
-	chanId plan.AccessChannelID,
-	encrypted []byte,
-) ([]byte, error) {
-	communityKey, _, err := ski.keyring.GetCommunityKey(chanId)
-	if err != nil {
-		return []byte{}, err
-	}
-	var nonce [24]byte
-	copy(nonce[:], encrypted[:24])
-	decrypted, ok := secretbox.Open(nil, encrypted[24:],
-		&nonce, communityKeyToArray(communityKey))
-	if !ok {
-		return nil, plan.Error(
-			-1, "secretbox.Open failed but doesn't produce an error")
-	}
-	return decrypted, nil
-}
-
-// given an encrypted buffer, Decrypt decrypts it using
-// the community key for the channel and returns the cleartext buffer
-func (ski *SKI) XDecrypt(
 	keyID plan.CommunityKeyID,
 	encrypted []byte,
 ) ([]byte, error) {
@@ -202,14 +181,14 @@ func (ski *SKI) XDecrypt(
 	return decrypted, nil
 }
 
-// given an encrypted buffer, DecryptFrom decrypts it using
-// the user's private key and returns the decrypted buffer
+// given an encrypted buffer and a public key, DecryptFrom decrypts it
+// using the user's private key and returns the decrypted buffer
 func (ski *SKI) DecryptFrom(
-	chanId plan.AccessChannelID,
+	recvPubKey plan.IdentityPublicKey,
 	encrypted []byte,
 	senderPubKey plan.IdentityPublicKey,
 ) ([]byte, error) {
-	privateKey, _, err := ski.keyring.GetEncryptKey(chanId)
+	privateKey, err := ski.keyring.GetEncryptKey(recvPubKey)
 	if err != nil {
 		return []byte{}, err
 	}
@@ -230,63 +209,17 @@ func (ski *SKI) DecryptFrom(
 
 // NewIdentity generates encryption and signing keys, adds them to the
 // keyring, and returns the public keys associated with those private
-// keys as (encryption, signing). The caller will want to call SetIdentity
-// to associated these keys with a specific channel.
+// keys as (encryption, signing).
 // TODO: I don't like the return signature here. too easy to screw up
 func (ski *SKI) NewIdentity() (
 	plan.IdentityPublicKey, plan.IdentityPublicKey) {
 	return ski.keyring.NewIdentity()
 }
 
-// SetIdentity assigns existing public keys to a specific existing channel.
-// Creates the channel keychain references if it doesn't exist, but returns
-// an error if either public key does not exist.
-func (ski *SKI) SetIdentity(
-	id plan.AccessChannelID,
-	encryptKey plan.IdentityPublicKey,
-	signingKey plan.IdentityPublicKey) error {
-	return ski.keyring.SetIdentity(id, encryptKey, signingKey)
-}
-
-// GetIdentity fetches the user's public keys from the keychain for a
-// specific channel, or an error if either the channel or key doesn't exist.
-func (ski *SKI) GetIdentity(chanId plan.AccessChannelID) (
-	plan.IdentityPublicKey, plan.IdentityPublicKey, error) {
-	var (
-		encryptPubKey plan.IdentityPublicKey
-		signingPubKey plan.IdentityPublicKey
-	)
-	_, encryptPubKey, err := ski.keyring.GetEncryptKey(chanId)
-	if err != nil {
-		return encryptPubKey, signingPubKey, err
-	}
-	_, signingPubKey, err = ski.keyring.GetSigningKey(chanId)
-	if err != nil {
-		return encryptPubKey, signingPubKey, err
-	}
-	return encryptPubKey, signingPubKey, nil
-}
-
 // NewCommunityKey generates a new community key, adds it to the keyring,
-// and returns the CommunityKeyID associated with that key. The caller will
-// want to call SetCommunityKey to associate the key with a specific channel.
+// and returns the CommunityKeyID associated with that key.
 func (ski *SKI) NewCommunityKey() plan.CommunityKeyID {
 	return ski.keyring.NewCommunityKey()
-}
-
-// SetCommunityKey assigns an existing community key to a specific existing
-// channel. Returns an error if either the channel keychain reference or the
-// community key don't already exist.
-func (ski *SKI) SetCommunityKey(
-	chanId plan.AccessChannelID, keyId plan.CommunityKeyID) error {
-	return ski.keyring.SetCommunityKey(chanId, keyId)
-}
-
-// GetCommunityKeyID fetches the community key ID from the keychain for a
-// specific channel, or an error if either the channel or key doesn't exist.
-func (ski *SKI) GetCommunityKeyID(chanId plan.AccessChannelID) (
-	plan.CommunityKeyID, error) {
-	return ski.keyring.GetCommunityKeyID(chanId)
 }
 
 // ---------------------------------------------------------

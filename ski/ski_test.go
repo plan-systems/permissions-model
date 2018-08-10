@@ -9,21 +9,15 @@ import (
 
 func TestSymmetricEncrypion(t *testing.T) {
 
-	chanId := plan.AccessChannelID(plan.RootAccessChannel)
-
-	ski, _, _ := setUpSKI(t, chanId)
-
+	ski, _, _ := setUpSKI(t)
 	keyId := ski.NewCommunityKey()
-	err := ski.SetCommunityKey(chanId, keyId)
-	if err != nil {
-		t.Fatal(err)
-	}
 	clearIn := []byte("hello, world!")
-	encryptOut, err := ski.Encrypt(chanId, clearIn)
+
+	encryptOut, err := ski.Encrypt(keyId, clearIn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	clearOut, err := ski.Decrypt(chanId, encryptOut)
+	clearOut, err := ski.Decrypt(keyId, encryptOut)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,17 +28,16 @@ func TestSymmetricEncrypion(t *testing.T) {
 
 func TestPublicKeyEncrypion(t *testing.T) {
 
-	chanId := plan.AccessChannelID(plan.RootAccessChannel)
-	senderSki, senderEncryptPubKey, _ := setUpSKI(t, chanId)
-	recvSki, recvEncryptPubKey, _ := setUpSKI(t, chanId)
-
+	senderSki, senderEncryptPubKey, _ := setUpSKI(t)
+	recvSki, recvEncryptPubKey, _ := setUpSKI(t)
 	clearIn := []byte("hello, world!")
-	encryptOut, err := senderSki.EncryptFor(chanId, clearIn, recvEncryptPubKey)
+
+	encryptOut, err := senderSki.EncryptFor(senderEncryptPubKey, clearIn, recvEncryptPubKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 	clearOut, err := recvSki.DecryptFrom(
-		chanId, encryptOut, senderEncryptPubKey)
+		recvEncryptPubKey, encryptOut, senderEncryptPubKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,9 +48,8 @@ func TestPublicKeyEncrypion(t *testing.T) {
 
 func TestSigning(t *testing.T) {
 
-	chanId := plan.AccessChannelID(plan.RootAccessChannel)
-	senderSki, _, senderSignPubKey := setUpSKI(t, chanId)
-	recvSki, _, _ := setUpSKI(t, chanId)
+	senderSki, _, senderSignPubKey := setUpSKI(t)
+	recvSki, _, _ := setUpSKI(t)
 
 	entry := &plan.PDIEntryCrypt{
 		HeaderCrypt: []byte("encryptedtestheader"),
@@ -66,7 +58,7 @@ func TestSigning(t *testing.T) {
 	hash := &plan.PDIEntryHash{}
 	entry.ComputeHash(hash)
 
-	sig, err := senderSki.Sign(chanId, *hash)
+	sig, err := senderSki.Sign(senderSignPubKey, *hash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,34 +69,26 @@ func TestSigning(t *testing.T) {
 }
 
 func TestVouching(t *testing.T) {
-	chanId := plan.AccessChannelID(plan.RootAccessChannel)
-	senderSki, senderEncryptPubKey, _ := setUpSKI(t, chanId)
-	recvSki, recvEncryptKey, _ := setUpSKI(t, chanId)
+
+	senderSki, senderEncryptPubKey, _ := setUpSKI(t)
+	recvSki, recvEncryptPubKey, _ := setUpSKI(t)
 	keyId := senderSki.NewCommunityKey()
-	err := senderSki.SetCommunityKey(chanId, keyId)
+
+	msg, err := senderSki.Vouch(keyId, senderEncryptPubKey, recvEncryptPubKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	msg, err := senderSki.Vouch(chanId, recvEncryptKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = recvSki.AcceptVouch(chanId, msg, senderEncryptPubKey)
+	err = recvSki.AcceptVouch(recvEncryptPubKey, msg, senderEncryptPubKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
 // test setup helper
-func setUpSKI(t *testing.T, chanId plan.AccessChannelID) (
+func setUpSKI(t *testing.T) (
 	*SKI, plan.IdentityPublicKey, plan.IdentityPublicKey,
 ) {
 	ski := NewSKI()
-
 	encryptPubKey, signPubKey := ski.NewIdentity()
-	err := ski.SetIdentity(chanId, encryptPubKey, signPubKey)
-	if err != nil {
-		t.Fatal(err)
-	}
 	return ski, encryptPubKey, signPubKey
 }
