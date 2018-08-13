@@ -2,7 +2,6 @@ package user
 
 import (
 	"fmt"
-	"sync"
 
 	plan "github.com/plan-tools/go-plan/plan"
 	ski "github.com/plan-tools/permissions-model/ski"
@@ -12,9 +11,8 @@ import (
 type User struct {
 	Name  string
 	Addr  plan.IdentityAddr
-	SKI   *ski.SKI     // the user's out-of-process key store
-	Pnode *Pnode       // the local pnode data store
-	mux   sync.RWMutex // synchronizes channel access
+	SKI   *ski.SKI // the user's out-of-process key store
+	Pnode *Pnode   // the local pnode data store
 }
 
 // Create a new User and initialize their first keychain. Returns the first

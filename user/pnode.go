@@ -14,11 +14,12 @@ import (
 // processes entirely, but those processes will communicate over the wire
 // and we didn't want to implement that for this demo.
 type Pnode struct {
-	ID       int                                 // unique ID for the Pnode (1:1 with User?)
+	ID       int                                 // unique ID for the Pnode
 	Channels map[plan.ChannelID]*channel.Channel // local pnode data stores
 	PDI      *pdi.PDI                            // out-of-process distributed data store
 	Session  *User                               // a logged-in client
-	mux      sync.RWMutex                        // synchronizes channel access
+	pos      int                                 // internal tracker of position in PDI
+	mux      sync.RWMutex                        // synchronizes position and channel access
 }
 
 // Create a new Pnode and initialize the empty channels.
@@ -27,6 +28,7 @@ func NewPnode(nodeId int, pdi *pdi.PDI) *Pnode {
 		ID:       nodeId,
 		Channels: map[plan.ChannelID]*channel.Channel{},
 		PDI:      pdi,
+		pos:      0,
 	}
 	return node
 }
@@ -46,10 +48,16 @@ func (p *Pnode) Pop() (plan.ChannelID, uint32, error) {
 		chanId  plan.ChannelID
 		entryId uint32
 	)
-	entryCrypt, err := p.PDI.Peek(p.ID)
+	// TODO: right now we're using a very coarse lock on the public
+	// methods but for performance that's probably not a good idea.
+	// Revisit this as it gets lifted into go-plan.
+	p.mux.Lock()
+	defer p.mux.Unlock()
+	entryCrypt, err := p.PDI.Peek(p.pos)
 	if err != nil {
 		return chanId, entryId, err
 	}
+	p.pos = p.pos + 1
 	header, headerBuf, err := p.unpackHeader(entryCrypt)
 	if err != nil {
 		return chanId, entryId, err
@@ -82,6 +90,11 @@ func (p *Pnode) Read(chanId plan.ChannelID, entryId uint32) (
 	if p.Session == nil {
 		return nil, plan.Error(-1, "no logged in user")
 	}
+	// TODO: right now we're using a very coarse lock on the public
+	// methods but for performance that's probably not a good idea.
+	// Revisit this as it gets lifted into go-plan.
+	p.mux.RLock()
+	defer p.mux.RUnlock()
 	ch, ok := p.Channels[chanId]
 	if !ok {
 		return nil, plan.Error(-1, "invalid channel")
@@ -136,7 +149,7 @@ func (p *Pnode) unpackHeader(entryCrypt *plan.PDIEntryCrypt) (
 //   valid and that they had permissions to write. note that because
 //   permissions are immutable at a point in time, it doesn't matter
 //   when we check permissions if they're changed later -- they'll
-//   always be the same for an entry at a specific point in time
+//   always be the same for an entry at a specific point in time.
 func (p *Pnode) validateHeader(
 	header *plan.PDIEntryHeader,
 	hash plan.PDIEntryHash,

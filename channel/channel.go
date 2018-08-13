@@ -313,9 +313,9 @@ func (c *Channel) Store(entry *plan.PDIEntry) uint32 {
 	return uint32(len(c.Entries) - 1)
 }
 
-// Get is the low-level method for fetching a specific entry based
+// Fetch is the low-level method for fetching a specific entry based
 // on its index.
-func (c *Channel) Get(entryID uint32) (*plan.PDIEntry, error) {
+func (c *Channel) Fetch(entryID uint32) (*plan.PDIEntry, error) {
 	c.mux.RLock()
 	defer c.mux.RUnlock()
 	if uint32(len(c.Entries)) < entryID+1 {
