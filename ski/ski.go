@@ -119,6 +119,7 @@ func (ski *SKI) Encrypt(keyId plan.CommunityKeyID, msg []byte,
 	if err != nil {
 		return []byte{}, err
 	}
+
 	encrypted := secretbox.Seal(nonceToArray(nonce)[:], msg,
 		nonceToArray(nonce), communityKeyToArray(communityKey))
 	return encrypted, nil
@@ -246,21 +247,18 @@ func newSig(arr []byte) plan.PDIEntrySig {
 
 // TODO: we'll want to make this a method on plan.IdentityPublicKey
 func newPubKey(arr *[32]byte) plan.IdentityPublicKey {
-	k := plan.IdentityPublicKey{}
-	copy(k[:], arr[:32])
+	k := plan.IdentityPublicKey(*arr)
 	return k
 }
 
 // TODO: we'll want to make this a method on plan.IdentityPublicKey
 func pubKeyToArray(k plan.IdentityPublicKey) *[32]byte {
-	var arr [32]byte
-	copy(arr[:], k[:32])
+	arr := [32]byte(k)
 	return &arr
 }
 
 // TODO: we'll want to make this a method on plan.CommunityKey
 func communityKeyToArray(k plan.CommunityKey) *[32]byte {
-	var arr [32]byte
-	copy(arr[:], k[:32])
+	arr := [32]byte(k)
 	return &arr
 }
