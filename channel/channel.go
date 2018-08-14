@@ -250,7 +250,7 @@ func (c *Channel) encryptHeader(
 ) ([]byte, error) {
 	// create the encrypted header
 	header := &plan.PDIEntryHeader{
-		Time:             plan.Time(time.Now().Unix()),
+		Time:             plan.Now(),
 		Verb:             verb,
 		ChannelID:        c.Properties.ChannelID,
 		Author:           author.Addr,
