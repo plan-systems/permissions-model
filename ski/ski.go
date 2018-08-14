@@ -5,13 +5,20 @@
 package ski // import "github.com/plan-tools/permissions-model/ski"
 
 import (
-	"encoding/json"
+    "encoding/json"
+    "net/http"
 
 	plan "github.com/plan-tools/go-plan/plan"
 	box "golang.org/x/crypto/nacl/box"
 	secretbox "golang.org/x/crypto/nacl/secretbox"
 	sign "golang.org/x/crypto/nacl/sign"
 )
+
+
+const (
+    vouchCodecName = "/plan/ski/vouch/1"
+)
+
 
 // SKI represents the external SKI process and holds the keyring.
 type SKI struct {
@@ -41,48 +48,55 @@ func (ski *SKI) Vouch(
 ) ([]byte, error) {
 	communityKey, err := ski.keyring.GetCommunityKeyByID(communityKeyID)
 	if err != nil {
-		return []byte{}, err
+		return nil, err
 	}
 	keyMsgBody := vouchMessage{KeyID: communityKeyID, Key: communityKey}
 	serializedBody, err := json.Marshal(keyMsgBody)
 	if err != nil {
-		return []byte{}, err
-	}
+		return nil, err
+    }
+
+
 	pdiMsgBody := &plan.PDIEntryBody{
 		BodyParts: []plan.PDIBodyPart{
-			plan.PDIBodyPart{
-				// TODO: presumably we want some kind of codec here
-				Header: "/plan/key",
-				Body:   serializedBody,
-			},
+			plan.PDIBodyPart {
+                Header:  make( http.Header ),
+                Content: serializedBody,
+            },
 		},
-	}
+    }
+    pdiMsgBody.BodyParts[0].Header.Add(plan.PDIContentCodecHeaderName, vouchCodecName)
+
 	// TODO: is there a 2nd codec here we need to somehow specify?
-	msg, err := json.Marshal(pdiMsgBody)
+	bodyData, err := json.Marshal(pdiMsgBody)
 	if err != nil {
-		return []byte{}, err
+		return nil, err
 	}
-	return ski.EncryptFor(senderPubKey, msg, recvPubKey)
+	return ski.EncryptFor(senderPubKey, bodyData, recvPubKey)
 }
 
 // AcceptVouch decrypts the encrypted buffer written by Vouch and decrypts
 // it for the recipient.
 func (ski *SKI) AcceptVouch(
-	recvPubKey plan.IdentityPublicKey,
+    recvPubKey plan.IdentityPublicKey,
 	bodyCrypt []byte,
 	senderPubKey plan.IdentityPublicKey,
 ) error {
-	msg, err := ski.DecryptFrom(recvPubKey, bodyCrypt, senderPubKey)
+    
+	bodyData, err := ski.DecryptFrom(recvPubKey, bodyCrypt, senderPubKey)
 	if err != nil {
 		return err
-	}
+    }
 	pdiMsgBody := &plan.PDIEntryBody{}
-	err = json.Unmarshal(msg, pdiMsgBody)
+	err = json.Unmarshal(bodyData, pdiMsgBody)
 	if err != nil {
 		return err
-	}
+    }
+    if pdiMsgBody.BodyParts[0].Header.Get( plan.PDIContentCodecHeaderName ) != vouchCodecName {
+        return plan.Errorf( -1, "did not find valid '%s' header", plan.PDIContentCodecHeaderName )
+    }
 	keyMsgBody := &vouchMessage{}
-	err = json.Unmarshal(pdiMsgBody.BodyParts[0].Body, keyMsgBody)
+	err = json.Unmarshal(pdiMsgBody.BodyParts[0].Content, keyMsgBody)
 	if err != nil {
 		return err
 	}
@@ -103,8 +117,8 @@ func (ski *SKI) Sign(signer plan.IdentityPublicKey, hash plan.PDIEntryHash,
 	if err != nil {
 		return plan.PDIEntrySig{}, err
 	}
-	signed := sign.Sign([]byte{}, hash[:], privateKey)
-	return newSig(signed[:64]), nil
+	signed := sign.Sign(nil, hash[:], privateKey)
+	return plan.NewPDIEntrySig(signed[:64]), nil
 }
 
 // Encrypt accepts a buffer and encrypts it with the community key and returns
@@ -112,16 +126,16 @@ func (ski *SKI) Sign(signer plan.IdentityPublicKey, hash plan.PDIEntryHash,
 // serialized PDIEntryBody or PDIEntryHeader. This is authenticated encryption
 // but the caller will follow this call with a call to Verify the PDIEntryHash
 // for validation.
-func (ski *SKI) Encrypt(keyId plan.CommunityKeyID, msg []byte,
+func (ski *SKI) Encrypt(keyID plan.CommunityKeyID, msg []byte,
 ) ([]byte, error) {
-	nonce := <-nonces
-	communityKey, err := ski.keyring.GetCommunityKeyByID(keyId)
+	salt := <-salts
+	communityKey, err := ski.keyring.GetCommunityKeyByID(keyID)
 	if err != nil {
-		return []byte{}, err
+		return nil, err
 	}
 
-	encrypted := secretbox.Seal(nonceToArray(nonce)[:], msg,
-		nonceToArray(nonce), communityKeyToArray(communityKey))
+    encrypted := secretbox.Seal(salt[:], msg, &salt, communityKey.ToArray())
+    
 	return encrypted, nil
 }
 
@@ -137,13 +151,13 @@ func (ski *SKI) EncryptFor(
 	msg []byte,
 	recvPubKey plan.IdentityPublicKey,
 ) ([]byte, error) {
-	nonce := <-nonces
+	salt := <-salts
 	privateKey, err := ski.keyring.GetEncryptKey(senderPubKey)
 	if err != nil {
-		return []byte{}, err
+		return nil, err
 	}
-	encrypted := box.Seal(nonceToArray(nonce)[:], msg,
-		nonceToArray(nonce), pubKeyToArray(recvPubKey), privateKey)
+	encrypted := box.Seal(salt[:], msg,
+		&salt, recvPubKey.ToArray(), privateKey)
 	return encrypted, nil
 }
 
@@ -163,7 +177,7 @@ func (ski *SKI) Verify(
 	var signedMsg []byte
 	signedMsg = append(signedMsg, sig[:]...)
 	signedMsg = append(signedMsg, hash[:]...)
-	verified, ok := sign.Open([]byte{}, signedMsg[:], pubKeyToArray(pubKey))
+	verified, ok := sign.Open(nil, signedMsg[:], pubKey.ToArray())
 	return verified, ok
 }
 
@@ -175,12 +189,11 @@ func (ski *SKI) Decrypt(
 ) ([]byte, error) {
 	communityKey, err := ski.keyring.GetCommunityKeyByID(keyID)
 	if err != nil {
-		return []byte{}, err
+		return nil, err
 	}
-	var nonce [24]byte
-	copy(nonce[:], encrypted[:24])
-	decrypted, ok := secretbox.Open(nil, encrypted[24:],
-		&nonce, communityKeyToArray(communityKey))
+	var salt [24]byte
+	copy(salt[:], encrypted[:24])
+	decrypted, ok := secretbox.Open(nil, encrypted[24:], &salt, communityKey.ToArray())
 	if !ok {
 		return nil, plan.Error(
 			-1, "secretbox.Open failed but doesn't produce an error")
@@ -198,12 +211,12 @@ func (ski *SKI) DecryptFrom(
 ) ([]byte, error) {
 	privateKey, err := ski.keyring.GetEncryptKey(recvPubKey)
 	if err != nil {
-		return []byte{}, err
+		return nil, err
 	}
-	var nonce [24]byte
-	copy(nonce[:], encrypted[:24])
+	var salt [24]byte
+	copy(salt[:], encrypted[:24])
 	decrypted, ok := box.Open(nil, encrypted[24:],
-		&nonce, pubKeyToArray(senderPubKey), privateKey)
+		&salt, senderPubKey.ToArray(), privateKey)
 	if !ok {
 		return nil, plan.Error(
 			-1, "box.Open failed but doesn't produce an error")
@@ -228,37 +241,4 @@ func (ski *SKI) NewIdentity() (
 // and returns the CommunityKeyID associated with that key.
 func (ski *SKI) NewCommunityKey() plan.CommunityKeyID {
 	return ski.keyring.NewCommunityKey()
-}
-
-// ---------------------------------------------------------
-//
-// Helper functions
-// some of these will want to stay in the SKI, whereas others
-// make more sense to land in the plan.go types. Lots of making
-// up for golang's embarassing type system here
-//
-
-// TODO: we'll want to make this a method on plan.PDIEntrySig
-func newSig(arr []byte) plan.PDIEntrySig {
-	sig := plan.PDIEntrySig{}
-	copy(sig[:], arr[:64])
-	return sig
-}
-
-// TODO: we'll want to make this a method on plan.IdentityPublicKey
-func newPubKey(arr *[32]byte) plan.IdentityPublicKey {
-	k := plan.IdentityPublicKey(*arr)
-	return k
-}
-
-// TODO: we'll want to make this a method on plan.IdentityPublicKey
-func pubKeyToArray(k plan.IdentityPublicKey) *[32]byte {
-	arr := [32]byte(k)
-	return &arr
-}
-
-// TODO: we'll want to make this a method on plan.CommunityKey
-func communityKeyToArray(k plan.CommunityKey) *[32]byte {
-	arr := [32]byte(k)
-	return &arr
 }
