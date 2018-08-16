@@ -4,9 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
-	"time"
 
-	plan "github.com/plan-tools/go-plan/plan"
+	plan "github.com/plan-tools/permissions-model/plan"
 	ski "github.com/plan-tools/permissions-model/ski"
 )
 
@@ -254,7 +253,7 @@ func (c *Channel) encryptHeader(
 		Verb:             verb,
 		ChannelID:        c.Properties.ChannelID,
 		Author:           author.Addr,
-		AccessChannelID:  accessChannelID,
+		AccessChannelID:  plan.ChannelID(accessChannelID),
 		AccessChannelRev: c.Properties.OwningAccessChannelRev,
 	}
 	headerClear, err := json.Marshal(header)

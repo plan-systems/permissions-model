@@ -8,7 +8,7 @@ import (
     "encoding/json"
     "net/http"
 
-	plan "github.com/plan-tools/go-plan/plan"
+	plan "github.com/plan-tools/permissions-model/plan"
 	box "golang.org/x/crypto/nacl/box"
 	secretbox "golang.org/x/crypto/nacl/secretbox"
 	sign "golang.org/x/crypto/nacl/sign"
@@ -56,7 +56,7 @@ func (ski *SKI) Vouch(
 		return nil, err
     }
 
-
+    
 	pdiMsgBody := &plan.PDIEntryBody{
 		BodyParts: []plan.PDIBodyPart{
 			plan.PDIBodyPart {
@@ -82,7 +82,7 @@ func (ski *SKI) AcceptVouch(
 	bodyCrypt []byte,
 	senderPubKey plan.IdentityPublicKey,
 ) error {
-    
+
 	bodyData, err := ski.DecryptFrom(recvPubKey, bodyCrypt, senderPubKey)
 	if err != nil {
 		return err

@@ -3,7 +3,7 @@ package pdi
 import (
 	"sync"
 
-	plan "github.com/plan-tools/go-plan/plan"
+	plan "github.com/plan-tools/permissions-model/plan"
 )
 
 // PDI represents the distributed persistent store for this demo.

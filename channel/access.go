@@ -3,7 +3,7 @@ package channel
 import (
 	"encoding/json"
 
-	plan "github.com/plan-tools/go-plan/plan"
+	plan "github.com/plan-tools/permissions-model/plan"
 )
 
 type AccessChannel struct {
@@ -11,11 +11,11 @@ type AccessChannel struct {
 }
 
 func (ac *AccessChannel) GetRev(rev uint32) (*AccessChannelRevEntry, error) {
-	entry, err := ac.Channel.Get(rev)
+	entry, err := ac.Channel.Fetch(rev)
 	if err != nil {
 		return nil, err
 	}
-	buf := entry.Body.BodyParts[0].Body
+	buf := entry.Body.BodyParts[0].Content
 	var revEntry *AccessChannelRevEntry
 	err = json.Unmarshal(buf, revEntry)
 	if err != nil {

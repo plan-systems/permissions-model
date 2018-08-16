@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"sync"
 
-	plan "github.com/plan-tools/go-plan/plan"
+	plan "github.com/plan-tools/permissions-model/plan"
 	channel "github.com/plan-tools/permissions-model/channel"
 	pdi "github.com/plan-tools/permissions-model/pdi"
 )

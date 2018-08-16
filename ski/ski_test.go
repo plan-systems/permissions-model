@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	plan "github.com/plan-tools/go-plan/plan"
+	plan "github.com/plan-tools/permissions-model/plan"
 )
 
 func TestSymmetricEncrypion(t *testing.T) {

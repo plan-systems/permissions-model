@@ -3,7 +3,7 @@ package user
 import (
 	"fmt"
 
-	plan "github.com/plan-tools/go-plan/plan"
+	plan "github.com/plan-tools/permissions-model/plan"
 	ski "github.com/plan-tools/permissions-model/ski"
 )
 

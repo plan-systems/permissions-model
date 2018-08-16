@@ -4,7 +4,7 @@ import (
 	crypto_rand "crypto/rand"
 	"sync"
 
-	plan "github.com/plan-tools/go-plan/plan"
+	plan "github.com/plan-tools/permissions-model/plan"
 	box "golang.org/x/crypto/nacl/box"
 	sign "golang.org/x/crypto/nacl/sign"
 )

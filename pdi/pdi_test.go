@@ -3,7 +3,7 @@ package pdi
 import (
 	"testing"
 
-	plan "github.com/plan-tools/go-plan/plan"
+	plan "github.com/plan-tools/permissions-model/plan"
 )
 
 // because we're just smoke testing the error handling,
